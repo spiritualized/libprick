@@ -209,15 +209,15 @@ class FFMpeg:
         path = ''
 
         if os_family == 'Windows':
-            path = "{0}\\Lib\\site-packages\\av\\".format(sys.base_exec_prefix)
+            path = "{0}\\Lib\\site-packages\\av\\".format(sys.exec_prefix)
             if getattr(sys, 'frozen', False):
-                path = '{0}\\'.format(sys.base_exec_prefix)
+                path = '{0}\\'.format(sys.exec_prefix)
 
         elif os_family == 'Linux':
-            path = "{0}/lib/python{1}/site-packages/av/".format(sys.base_exec_prefix,
+            path = "{0}/lib/python{1}/site-packages/av/".format(sys.exec_prefix,
                                                                 '.'.join(platform.python_version_tuple()[0:2]))
             if getattr(sys, 'frozen', False):
-                path = '{0}/av/'.format(sys.base_exec_prefix)
+                path = '{0}/av/'.format(sys.exec_prefix)
 
         else:
             print("Platform '{0}' not supported".format(os_family), file=sys.stderr)
