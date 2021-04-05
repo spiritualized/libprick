@@ -187,7 +187,7 @@ class FFMpeg:
             return None
 
         stream_index = avp.stream_index
-        data = copy.copy(avp.data.contents)
+        data = bytes(avp.data[:avp.size])
         FFMpeg.avcodec.av_free_packet(avp)
 
         return Frame(stream_index, data)

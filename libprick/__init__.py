@@ -1,4 +1,5 @@
 import hashlib
+import os
 from typing import List
 
 from libprick.FFMpeg import FFMpeg, FFMpegError
@@ -10,9 +11,14 @@ class PrickError(Exception):
 
 class Pricker:
 
-    def __init__(self):
+    MIN_CALLBACK_INTERVAL = 1000000
+
+    def __init__(self, callback=None):
+        self.callback = callback
         self.ffmpeg = FFMpeg()
         self.hashers = []
+        self.bytes_hashed = 0
+        self.bytes_last_callback = 0
 
     def open(self, path: str) -> None:
         self.reset()
@@ -23,6 +29,7 @@ class Pricker:
             self.hashers = [hashlib.sha256() for _ in range(self.ffmpeg.get_num_streams())]
         except FFMpegError as e:
             raise PrickError("Could not open file") from e
+
         self.__hash()
 
     def reset(self) -> None:
@@ -55,7 +62,15 @@ class Pricker:
         frame = self.ffmpeg.read_frame()
         while frame:
             self.hashers[frame.stream_index].update(frame.data)
+
+            if self.callback:
+                self.bytes_hashed += len(frame.data)
+                if self.bytes_hashed > self.bytes_last_callback + Pricker.MIN_CALLBACK_INTERVAL:
+                    self.callback(self.bytes_hashed)
+                    self.bytes_last_callback = self.bytes_hashed
+
             frame = self.ffmpeg.read_frame()
+
 
     @staticmethod
     def version() -> int:
