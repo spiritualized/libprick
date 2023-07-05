@@ -1,4 +1,5 @@
 import copy
+import logging
 import os
 import platform
 import sys
@@ -6,6 +7,8 @@ import sysconfig
 from ctypes import Structure, POINTER, CFUNCTYPE, c_int, c_void_p, c_char, c_uint, c_int64, c_uint8, c_char_p, \
     c_ulong, CDLL, byref
 from typing import Optional
+
+import av
 
 int64_t = c_int64
 uint8_t = c_uint8
@@ -18,6 +21,10 @@ class AVFormatContext(Structure):
 
 
 class AVPacket(Structure):
+    pass
+
+
+class AVRational(Structure):
     pass
 
 
@@ -98,6 +105,11 @@ AVFormatContext._fields_ = [
         ('max_probe_packets', c_int),
     ]
 
+AVRational._fields_ = [
+    ('num', c_int),
+    ('den', c_int),
+]
+
 AVPacket._fields_ = [
     ('buf', int64_t),
     ('pts', int64_t),
@@ -110,8 +122,11 @@ AVPacket._fields_ = [
     ('side_data_elems', c_int),
     ('duration', c_int64),
     ('pos', c_int64),
-    ('convergence_duration', c_int64),
+    ('opaque', c_int64),
+    ('opaque_ref', c_int64),
+    ('time_base', AVRational),
 ]
+
 
 
 class FFMpegError(Exception):
@@ -139,9 +154,12 @@ class FFMpeg:
         os_family = platform.system()
 
         if os_family == 'Windows':
-            FFMpeg.avcodec = CDLL("{0}avcodec-58".format(lib_path))
-            FFMpeg.avformat = CDLL("{0}avformat-58".format(lib_path))
-            FFMpeg.avutil = CDLL("{0}avutil-56".format(lib_path))
+            FFMpeg.avcodec = CDLL(FFMpeg.__find_matching_lib(lib_path, "avcodec"))
+            FFMpeg.avformat = CDLL(FFMpeg.__find_matching_lib(lib_path, "avformat"))
+            FFMpeg.avutil = CDLL(FFMpeg.__find_matching_lib(lib_path, "avutil"))
+            # FFMpeg.avcodec = CDLL("{0}avcodec-58".format(lib_path))
+            # FFMpeg.avformat = CDLL("{0}avformat-58".format(lib_path))
+            # FFMpeg.avutil = CDLL("{0}avutil-56".format(lib_path))
         elif os_family == 'Linux':
             cython = sysconfig.get_config_var('SOABI')
             FFMpeg.avcodec = CDLL("{0}codec/codec.{1}.so".format(lib_path, cython))
@@ -151,11 +169,10 @@ class FFMpeg:
             print("Platform '{0}' not supported".format(os_family), file=sys.stderr)
             exit(1)
 
-        FFMpeg.avcodec.av_free_packet.argtypes = [POINTER(AVPacket)]
+        FFMpeg.avcodec.av_packet_unref.argtypes = [POINTER(AVPacket)]
         FFMpeg.avformat.avformat_open_input.argtypes = [POINTER(POINTER(AVFormatContext)), c_char_p, c_char_p, c_char_p]
         FFMpeg.avformat.avformat_close_input.argtypes = [POINTER(POINTER(AVFormatContext))]
 
-        FFMpeg.avformat.av_register_all()
         FFMpeg.avutil.av_log_set_level(FFMpeg.AV_LOG_QUIET)
 
         self.pFormatCtx = None
@@ -181,6 +198,7 @@ class FFMpeg:
 
     def read_frame(self) -> Optional[Frame]:
         avp = AVPacket()
+        # avp = av.Packet()
         res = FFMpeg.avformat.av_read_frame(self.pFormatCtx, byref(avp))
 
         if res < 0:
@@ -188,7 +206,7 @@ class FFMpeg:
 
         stream_index = avp.stream_index
         data = bytes(avp.data[:avp.size])
-        FFMpeg.avcodec.av_free_packet(avp)
+        FFMpeg.avcodec.av_packet_unref(avp)
 
         return Frame(stream_index, data)
 
@@ -209,7 +227,7 @@ class FFMpeg:
         path = ''
 
         if os_family == 'Windows':
-            path = "{0}\\Lib\\site-packages\\av\\".format(sys.exec_prefix)
+            path = "{0}\\Lib\\site-packages\\av.libs\\".format(sys.exec_prefix)
             if getattr(sys, 'frozen', False):
                 path = '{0}\\'.format(sys.exec_prefix)
 
@@ -227,3 +245,27 @@ class FFMpeg:
             raise FFMpegError("Could not load FFMpeg libs. Is the 'av' package installed?\nlib path: {0}".format(path))
 
         return path
+
+    @staticmethod
+    def __find_matching_lib(directory: str, prefix: str) -> str:
+
+        candidates = []
+        os_family = platform.system()
+
+        for x in os.listdir(directory):
+            if x.startswith(f"{prefix}-"):
+
+                if (os_family == "Windows" and x.lower().endswith(".dll")) \
+                        or (os_family == "Linux" and ".so" in x.lower()):
+                    candidates.append(x)
+
+        candidates = sorted(candidates)
+
+        if len(candidates) == 0:
+            raise OSError(f"Could not find a binary for {prefix}")
+
+        if len(candidates) > 1:
+            logging.warning(f"{len(candidates)} candidates for {prefix}, using {candidates[-1]}")
+            return os.path.join(directory, candidates[-1])
+
+        return os.path.join(directory, candidates[0])
